@@ -18,15 +18,16 @@ app.use(express.json());
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
-// Simple bearer-token gate. Anyone who can reach this endpoint can submit
-// to your Kaggle competitions on your behalf, so keep MCP_BEARER_TOKEN set
-// in production and put the same value in Claude's custom connector config.
-// NOTE: this must come AFTER /health — Render's health checker doesn't send
-// the Authorization header, so gating it here would block deploys forever.
+// Token-in-URL gate. Claude's custom-connector modal has no field for a
+// custom Authorization header — only OAuth or fully open access — so the
+// secret has to travel inside the connector URL itself as a query param.
+// Anyone with the full URL (including ?token=...) can submit to your Kaggle
+// competitions on your behalf, so treat that URL like a password.
 app.use((req, res, next) => {
   if (!BEARER_TOKEN) return next(); // no token configured: open (local testing only)
   const auth = req.headers.authorization || "";
-  if (auth === `Bearer ${BEARER_TOKEN}`) return next();
+  const queryToken = req.query.token;
+  if (auth === `Bearer ${BEARER_TOKEN}` || queryToken === BEARER_TOKEN) return next();
   res.status(401).json({ error: "Unauthorized" });
 });
 
