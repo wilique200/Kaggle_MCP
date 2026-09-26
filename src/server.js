@@ -16,17 +16,19 @@ const kaggle = new KaggleClient({
 const app = express();
 app.use(express.json());
 
+app.get("/health", (req, res) => res.json({ status: "ok" }));
+
 // Simple bearer-token gate. Anyone who can reach this endpoint can submit
 // to your Kaggle competitions on your behalf, so keep MCP_BEARER_TOKEN set
 // in production and put the same value in Claude's custom connector config.
+// NOTE: this must come AFTER /health — Render's health checker doesn't send
+// the Authorization header, so gating it here would block deploys forever.
 app.use((req, res, next) => {
   if (!BEARER_TOKEN) return next(); // no token configured: open (local testing only)
   const auth = req.headers.authorization || "";
   if (auth === `Bearer ${BEARER_TOKEN}`) return next();
   res.status(401).json({ error: "Unauthorized" });
 });
-
-app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 // Stateless mode: build a fresh McpServer + transport per request. Simpler
 // and safer for a small personal server than juggling session IDs.
