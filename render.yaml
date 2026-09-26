@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: kaggle-mcp-server
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.1
+      # Render's default Python (used by node-gyp during npm install, even
+      # for pure-JS dependency trees) has had version-mismatch bugs on
+      # recent images. Pinning an older, stable release avoids that.
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # sync: false = Render prompts you to fill these in at deploy time
+      # (via the dashboard) rather than storing them in this file/repo.
+      - key: KAGGLE_USERNAME
+        sync: false
+      - key: KAGGLE_KEY
+        sync: false
+      - key: MCP_BEARER_TOKEN
+        sync: false
