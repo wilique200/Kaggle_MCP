@@ -338,7 +338,11 @@ export class KaggleClient {
 
     const rows = await Promise.all(
       list.map(async (comp) => {
-        const ref = comp.ref || comp.id || comp.competitionId;
+        // listCompetitions returns `ref` as a full URL
+        // (https://www.kaggle.com/competitions/slug-name), but the
+        // submissions endpoint needs just the slug — extract it.
+        const rawRef = comp.ref || comp.id || comp.competitionId || "";
+        const ref = rawRef.split("/").filter(Boolean).pop();
         let latestSubmission = null;
         try {
           const subs = await this.listSubmissions(ref, 1);
