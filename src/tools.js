@@ -165,7 +165,14 @@ export function registerKaggleTools(mcpServer, kaggle) {
         "(with GPU if requested). Runs asynchronously — call get_kernel_status to check progress, then " +
         "get_kernel_output once it's complete.",
       inputSchema: {
-        id: z.string().describe("'yourusername/kernel-slug' — must match an existing kernel to update it"),
+        slug: z
+          .string()
+          .describe("'yourusername/kernel-slug' — creates a new kernel, or targets an existing one by name"),
+        kernelId: z
+          .number()
+          .int()
+          .optional()
+          .describe("Numeric kernel ID (from pull_kernel/list_kernels) to update an existing kernel instead of by slug"),
         newTitle: z.string().optional().describe("Required when creating a new kernel"),
         text: z.string().describe("Full source code (Python/R script, or notebook JSON if kernelType='notebook')"),
         language: z.enum(["python", "r", "rmarkdown"]),

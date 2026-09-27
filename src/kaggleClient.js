@@ -180,11 +180,17 @@ export class KaggleClient {
 
   /**
    * Push (create or update) a kernel/notebook and trigger a run.
-   * `id` must be "username/kernel-slug". Kaggle runs it asynchronously —
-   * poll kernelStatus() afterward to see when it finishes.
+   * Kaggle runs it asynchronously — poll kernelStatus() afterward.
+   *
+   * `slug` (string, "username/kernel-slug") creates a new kernel or targets
+   * an existing one by name. `kernelId` (integer, from pull_kernel/list_kernels)
+   * updates an existing kernel by its numeric ID instead — if both are given,
+   * Kaggle prefers kernelId. Passing a slug string into an `id` field is what
+   * caused "Could not convert string to integer" — id must be a real integer.
    */
   kernelPush({
-    id,
+    slug,
+    kernelId,
     newTitle,
     text,
     language,
@@ -200,7 +206,8 @@ export class KaggleClient {
     return this._request("/kernels/push", {
       method: "POST",
       json: {
-        id,
+        id: kernelId ? Number(kernelId) : undefined,
+        slug,
         newTitle,
         text,
         language,
