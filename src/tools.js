@@ -129,6 +129,12 @@ export function registerKaggleTools(mcpServer, kaggle) {
       description: "Search public kernels, or your own with group='profile'.",
       inputSchema: {
         search: z.string().optional(),
+        sortBy: z
+          .enum(["hotness", "commentCount", "dateCreated", "dateRun", "relevance", "scoreAscending", "scoreDescending", "viewCount", "voteCount"])
+          .optional()
+          .describe("e.g. voteCount for top-voted, scoreAscending/scoreDescending for competition score ordering"),
+        user: z.string().optional().describe("Only kernels by this Kaggle username"),
+        pageSize: z.number().int().min(1).max(100).optional(),
         competition: z.string().optional().describe("Filter to kernels using this competition"),
         dataset: z.string().optional().describe("Filter to kernels using this dataset, 'owner/slug'"),
         group: z.enum(["everyone", "profile", "upvoted"]).optional(),
@@ -374,6 +380,34 @@ export function registerKaggleTools(mcpServer, kaggle) {
     },
     async ({ competitionId, kernelOwner, kernelSlug, kernelVersion, fileName, message }) =>
       asText(await kaggle.submitNotebook(competitionId, kernelOwner, kernelSlug, { kernelVersion, fileName, message }))
+  );
+
+  mcpServer.registerTool(
+    "get_submission_budget",
+    {
+      title: "How many submissions are left today",
+      description:
+        "Reads a competition's daily submission cap and counts your submissions since 00:00 UTC, so you know how many remain before spending one.",
+      inputSchema: { competitionId: z.string().describe("Competition slug") },
+    },
+    async ({ competitionId }) => asText(await kaggle.getSubmissionBudget(competitionId))
+  );
+
+  mcpServer.registerTool(
+    "wait_for_kernel",
+    {
+      title: "Wait for a notebook run to finish",
+      description:
+        "Polls the run for up to ~55 seconds and returns as soon as it completes or errors, with the last lines of its log. If still running, call again.",
+      inputSchema: {
+        userName: z.string(),
+        kernelSlug: z.string(),
+        timeoutSeconds: z.number().int().min(1).max(55).optional(),
+        tailLines: z.number().int().min(1).optional(),
+      },
+    },
+    async ({ userName, kernelSlug, timeoutSeconds, tailLines }) =>
+      asText(await kaggle.waitForKernel(userName, kernelSlug, { timeoutSeconds, tailLines }))
   );
 
   mcpServer.registerTool(

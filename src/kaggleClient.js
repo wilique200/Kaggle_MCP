@@ -330,6 +330,90 @@ export class KaggleClient {
     throw new Error(`Notebook submission failed. Attempts:\n${attempts.join("\n")}`);
   }
 
+  // ---- Productivity helpers (not raw Kaggle endpoints) ----
+
+  /**
+   * How many submissions you have left today for a competition.
+   * Reads the competition's daily cap, then counts your submissions made
+   * since 00:00 UTC (Kaggle's daily limit resets at UTC midnight — this is
+   * an assumption worth confirming on your first real call). Failed
+   * submissions are counted too, since it's unclear whether Kaggle refunds them.
+   */
+  async getSubmissionBudget(competitionId) {
+    const slug = String(competitionId).split("/").filter(Boolean).pop();
+    const findComp = (resp) => {
+      const list = Array.isArray(resp) ? resp : resp.results || resp.competitions || [];
+      return list.find((c) => String(c.ref || c.id || "").split("/").filter(Boolean).pop() === slug);
+    };
+    let comp = findComp(await this.listCompetitions({ group: "entered", search: slug }));
+    if (!comp) comp = findComp(await this.listCompetitions({ search: slug }));
+    const dailyLimit = comp?.maxDailySubmissions ?? null;
+
+    const startOfDayUtc = new Date();
+    startOfDayUtc.setUTCHours(0, 0, 0, 0);
+    let usedToday = 0;
+    const today = [];
+    for (let page = 1; page <= 5; page++) {
+      const resp = await this.listSubmissions(slug, page);
+      const subs = Array.isArray(resp) ? resp : resp.submissions || [];
+      if (!subs.length) break;
+      let sawOlder = false;
+      for (const sub of subs) {
+        const when = new Date(sub.date || sub.dateSubmitted || sub.submittedDate || 0);
+        if (when >= startOfDayUtc) {
+          usedToday++;
+          today.push({ date: sub.date || sub.dateSubmitted, description: sub.description, status: sub.status, publicScore: sub.publicScore });
+        } else {
+          sawOlder = true;
+        }
+      }
+      if (sawOlder) break;
+    }
+    return {
+      competition: slug,
+      dailyLimit,
+      usedTodayUtc: usedToday,
+      remainingToday: dailyLimit == null ? null : Math.max(0, dailyLimit - usedToday),
+      deadline: comp?.deadline ?? null,
+      note: dailyLimit == null ? "Could not read the daily limit from Kaggle; usedTodayUtc is still counted." : undefined,
+      submissionsToday: today,
+    };
+  }
+
+  /**
+   * Poll a run for up to timeoutSeconds (capped at 55 so the MCP call itself
+   * doesn't time out), returning as soon as it reaches a terminal state along
+   * with the last lines of its log. Multi-hour runs still need repeat calls.
+   */
+  async waitForKernel(userName, kernelSlug, { timeoutSeconds = 45, tailLines = 30 } = {}) {
+    const limitMs = Math.min(Math.max(timeoutSeconds, 1), 55) * 1000;
+    const started = Date.now();
+    const terminal = /complete|error|cancel/i;
+    let st = await this.kernelStatus(userName, kernelSlug);
+    while (!terminal.test(String(st.status)) && Date.now() - started < limitMs) {
+      await new Promise((r) => setTimeout(r, 5000));
+      st = await this.kernelStatus(userName, kernelSlug);
+    }
+    const finished = terminal.test(String(st.status));
+    const result = {
+      status: st.status,
+      finished,
+      waitedSeconds: Math.round((Date.now() - started) / 1000),
+      failureMessage: st.failureMessage || undefined,
+    };
+    // Log is empty while running, so only fetch it once the run is over.
+    if (finished) {
+      try {
+        result.logTail = (await this.getKernelLog(userName, kernelSlug, { tailLines })).log;
+      } catch (e) {
+        result.logError = e.message;
+      }
+    } else {
+      result.note = "Still running; call again to keep waiting.";
+    }
+    return result;
+  }
+
   // ---- Datasets ----
 
   listDatasets(params = {}) {
