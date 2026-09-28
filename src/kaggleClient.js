@@ -201,6 +201,7 @@ export class KaggleClient {
     datasetDataSources = [],
     competitionDataSources = [],
     kernelDataSources = [],
+    modelDataSources = [],
     categoryIds = [],
   }) {
     return this._request("/kernels/push", {
@@ -218,6 +219,7 @@ export class KaggleClient {
         datasetDataSources,
         competitionDataSources,
         kernelDataSources,
+        modelDataSources,
         categoryIds,
       },
     });

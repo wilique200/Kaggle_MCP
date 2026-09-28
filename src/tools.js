@@ -182,6 +182,13 @@ export function registerKaggleTools(mcpServer, kaggle) {
         enableInternet: z.boolean().optional(),
         datasetDataSources: z.array(z.string()).optional().describe("'owner/dataset-slug' entries"),
         competitionDataSources: z.array(z.string()).optional().describe("Competition slugs"),
+        kernelDataSources: z.array(z.string()).optional().describe("'owner/kernel-slug' entries whose output to attach"),
+        modelDataSources: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Kaggle models to attach, each as 'owner/model-slug/framework/variation-slug/version', e.g. 'google/gemma/pyTorch/2b/1'"
+          ),
       },
     },
     async (params) => asText(await kaggle.kernelPush(params))
