@@ -9,6 +9,21 @@ export function registerKaggleTools(mcpServer, kaggle) {
     content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
   });
 
+  // Size guard so a big file can't flood the conversation.
+  const clipSchema = {
+    maxBytes: z.number().int().min(1).optional().describe("Cap on returned bytes (default 100000)"),
+    headLines: z.number().int().min(1).optional().describe("Return only the first N lines"),
+  };
+  const clip = (buf, maxBytes = 100000, headLines) => {
+    let text = buf.toString("utf-8");
+    const total = buf.byteLength;
+    if (headLines) text = text.split("\n").slice(0, headLines).join("\n");
+    if (Buffer.byteLength(text) > maxBytes) text = Buffer.from(text).subarray(0, maxBytes).toString("utf-8");
+    return Buffer.byteLength(text) < total
+      ? `[truncated: showing ${Buffer.byteLength(text)} of ${total} bytes]\n${text}`
+      : text;
+  };
+
   mcpServer.registerTool(
     "list_competitions",
     {
@@ -74,11 +89,11 @@ export function registerKaggleTools(mcpServer, kaggle) {
       title: "Download a competition data file",
       description:
         "Download one file from a competition's dataset. Returns raw bytes decoded as UTF-8 text — only use for text/CSV files, not binary/image archives.",
-      inputSchema: { competitionId: z.string(), fileName: z.string() },
+      inputSchema: { competitionId: z.string(), fileName: z.string(), ...clipSchema },
     },
-    async ({ competitionId, fileName }) => {
+    async ({ competitionId, fileName, maxBytes, headLines }) => {
       const buf = await kaggle.downloadCompetitionDataFile(competitionId, fileName);
-      return { content: [{ type: "text", text: buf.toString("utf-8") }] };
+      return { content: [{ type: "text", text: clip(buf, maxBytes, headLines) }] };
     }
   );
 
@@ -179,6 +194,12 @@ export function registerKaggleTools(mcpServer, kaggle) {
         kernelType: z.enum(["script", "notebook"]),
         isPrivate: z.boolean().optional(),
         enableGpu: z.boolean().optional(),
+        machineShape: z
+          .string()
+          .optional()
+          .describe(
+            "Accelerator ID, e.g. NvidiaTeslaP100, NvidiaTeslaT4, NvidiaTeslaT4Highmem, NvidiaL4, NvidiaL4X1, NvidiaTeslaA100, NvidiaH100, NvidiaRtxPro6000, TpuV38, TpuV5E8, TpuV6E8. Some are competition-restricted. Set enableGpu true alongside."
+          ),
         enableInternet: z.boolean().optional(),
         datasetDataSources: z.array(z.string()).optional().describe("'owner/dataset-slug' entries"),
         competitionDataSources: z.array(z.string()).optional().describe("Competition slugs"),
@@ -302,6 +323,60 @@ export function registerKaggleTools(mcpServer, kaggle) {
   );
 
   mcpServer.registerTool(
+    "get_kernel_log",
+    {
+      title: "Get notebook log as plain text",
+      description:
+        "Plain-text log of the latest run (flattened from Kaggle's JSON event stream). Use tailLines to see just the end. Log is empty while a run is still in progress.",
+      inputSchema: {
+        userName: z.string(),
+        kernelSlug: z.string(),
+        tailLines: z.number().int().min(1).optional(),
+        stream: z.enum(["stdout", "stderr"]).optional(),
+      },
+    },
+    async ({ userName, kernelSlug, tailLines, stream }) =>
+      asText(await kaggle.getKernelLog(userName, kernelSlug, { tailLines, stream }))
+  );
+
+  mcpServer.registerTool(
+    "get_kernel_output_file",
+    {
+      title: "List or read a notebook output file",
+      description:
+        "Omit fileName to list output files. With fileName, downloads it server-side and returns text (size-capped; tail=true returns the end).",
+      inputSchema: {
+        userName: z.string(),
+        kernelSlug: z.string(),
+        fileName: z.string().optional(),
+        maxBytes: z.number().int().min(1).optional(),
+        tail: z.boolean().optional(),
+      },
+    },
+    async ({ userName, kernelSlug, fileName, maxBytes, tail }) =>
+      asText(await kaggle.getKernelOutputFile(userName, kernelSlug, { fileName, maxBytes, tail }))
+  );
+
+  mcpServer.registerTool(
+    "submit_notebook",
+    {
+      title: "Submit a notebook version to a code competition",
+      description:
+        "For code competitions that only accept notebook submissions: submits a specific version of a notebook (its output file becomes the submission).",
+      inputSchema: {
+        competitionId: z.string().describe("Competition slug"),
+        kernelOwner: z.string(),
+        kernelSlug: z.string(),
+        kernelVersion: z.number().int().optional().describe("Notebook version number (latest if omitted)"),
+        fileName: z.string().optional().describe("Output file to submit, default submission.csv"),
+        message: z.string().optional(),
+      },
+    },
+    async ({ competitionId, kernelOwner, kernelSlug, kernelVersion, fileName, message }) =>
+      asText(await kaggle.submitNotebook(competitionId, kernelOwner, kernelSlug, { kernelVersion, fileName, message }))
+  );
+
+  mcpServer.registerTool(
     "list_datasets",
     {
       title: "List/search Kaggle datasets",
@@ -331,11 +406,11 @@ export function registerKaggleTools(mcpServer, kaggle) {
       title: "Download a dataset file",
       description:
         "Download one file from a dataset. Returns content decoded as UTF-8 text — only use for text/CSV files.",
-      inputSchema: { ownerSlug: z.string(), datasetSlug: z.string(), fileName: z.string() },
+      inputSchema: { ownerSlug: z.string(), datasetSlug: z.string(), fileName: z.string(), ...clipSchema },
     },
-    async ({ ownerSlug, datasetSlug, fileName }) => {
+    async ({ ownerSlug, datasetSlug, fileName, maxBytes, headLines }) => {
       const buf = await kaggle.downloadDatasetFile(ownerSlug, datasetSlug, fileName);
-      return { content: [{ type: "text", text: buf.toString("utf-8") }] };
+      return { content: [{ type: "text", text: clip(buf, maxBytes, headLines) }] };
     }
   );
 }

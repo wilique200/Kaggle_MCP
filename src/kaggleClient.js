@@ -202,6 +202,7 @@ export class KaggleClient {
     competitionDataSources = [],
     kernelDataSources = [],
     modelDataSources = [],
+    machineShape,
     categoryIds = [],
   }) {
     return this._request("/kernels/push", {
@@ -220,9 +221,113 @@ export class KaggleClient {
         competitionDataSources,
         kernelDataSources,
         modelDataSources,
+        machineShape,
         categoryIds,
       },
     });
+  }
+
+  // ---- Reading run results ----
+
+  /** Fetch kernel output once and normalise the pieces we care about. */
+  async _getKernelOutputParsed(userName, kernelSlug) {
+    const out = await this.kernelOutput(userName, kernelSlug);
+    const rawLog = out.log ?? out.logNullable ?? "";
+    const files = out.files || out.outputFiles || [];
+    return { out, rawLog, files };
+  }
+
+  /**
+   * Plain-text log for a kernel run. Kaggle returns the log as a JSON event
+   * stream ([{stream_name, time, data}, ...]) duplicated across two fields;
+   * this flattens it to readable text, optionally only the last N lines.
+   */
+  async getKernelLog(userName, kernelSlug, { tailLines, stream } = {}) {
+    const { out, rawLog } = await this._getKernelOutputParsed(userName, kernelSlug);
+    let text = "";
+    try {
+      const events = typeof rawLog === "string" ? JSON.parse(rawLog) : rawLog;
+      text = (Array.isArray(events) ? events : [])
+        .filter((e) => !stream || e.stream_name === stream)
+        .map((e) => e.data ?? "")
+        .join("");
+    } catch {
+      text = String(rawLog || ""); // already plain text
+    }
+    let lines = text.split("\n");
+    if (tailLines && tailLines > 0) lines = lines.slice(-tailLines);
+    return {
+      totalLines: text.split("\n").length,
+      returnedLines: lines.length,
+      error: out.error || undefined,
+      log: lines.join("\n"),
+    };
+  }
+
+  /**
+   * List a run's output files, or fetch one as text. Kaggle only hands back
+   * signed URLs, which Claude can't open, so this server downloads the file
+   * itself (no Authorization header — signed URLs reject it) and returns a
+   * size-limited slice.
+   */
+  async getKernelOutputFile(userName, kernelSlug, { fileName, maxBytes = 100000, tail = false } = {}) {
+    const { files } = await this._getKernelOutputParsed(userName, kernelSlug);
+    const nameOf = (f) => f.fileName || f.name || f.path || "";
+    if (!fileName) {
+      return { files: files.map((f) => ({ fileName: nameOf(f), size: f.totalBytes ?? f.size })) };
+    }
+    const match =
+      files.find((f) => nameOf(f) === fileName) ||
+      files.find((f) => nameOf(f).endsWith(fileName));
+    if (!match) {
+      return { error: `No output file matching '${fileName}'`, available: files.map(nameOf) };
+    }
+    const url = match.url || match.fileUrl;
+    if (!url) return { error: "Output file has no download URL", file: match };
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Output file download failed: ${res.status} ${res.statusText}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const truncated = buf.byteLength > maxBytes;
+    const slice = truncated ? (tail ? buf.subarray(buf.byteLength - maxBytes) : buf.subarray(0, maxBytes)) : buf;
+    return {
+      fileName: nameOf(match),
+      totalBytes: buf.byteLength,
+      truncated,
+      returned: tail && truncated ? "last bytes" : "first bytes",
+      content: slice.toString("utf-8"),
+    };
+  }
+
+  /**
+   * Submit a specific notebook version to a CODE competition (file uploads
+   * are rejected there). Mirrors `kaggle competitions submit -k owner/slug -v N`.
+   * NOTE: the exact REST path is not in Kaggle's published swagger, so this
+   * tries the likely candidates in order and reports every attempt.
+   */
+  async submitNotebook(competitionId, kernelOwner, kernelSlug, { kernelVersion, fileName = "submission.csv", message = "" } = {}) {
+    const body = {
+      competitionName: competitionId,
+      kernelOwner,
+      kernelSlug,
+      kernelVersion,
+      fileName,
+      submissionDescription: message,
+    };
+    const candidates = [
+      `/competitions/submissions/submit-code`,
+      `/competitions/${competitionId}/submissions/code`,
+      `/competitions/submissions/code`,
+    ];
+    const attempts = [];
+    for (const path of candidates) {
+      try {
+        return await this._request(path, { method: "POST", json: body });
+      } catch (e) {
+        attempts.push(`${path}: ${e.message}`);
+        if (!/ 404 /.test(e.message)) break; // real error from a real endpoint — stop guessing
+      }
+    }
+    throw new Error(`Notebook submission failed. Attempts:\n${attempts.join("\n")}`);
   }
 
   // ---- Datasets ----
