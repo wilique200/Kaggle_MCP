@@ -206,6 +206,16 @@ export function registerKaggleTools(mcpServer, kaggle) {
           .describe(
             "Accelerator ID, e.g. NvidiaTeslaP100, NvidiaTeslaT4, NvidiaTeslaT4Highmem, NvidiaL4, NvidiaL4X1, NvidiaTeslaA100, NvidiaH100, NvidiaRtxPro6000, TpuV38, TpuV5E8, TpuV6E8. Some are competition-restricted. Set enableGpu true alongside."
           ),
+        dockerImage: z
+          .string()
+          .optional()
+          .describe(
+            "Pin the container image, e.g. 'gcr.io/kaggle-private-byod/python@sha256:...' (copy the value from pull_kernel metadata of a notebook whose environment you need, such as an older Python 3.11 image). Omit for the newest image. Send together with dockerImagePinningType 'original'."
+          ),
+        dockerImagePinningType: z
+          .enum(["original", "latest"])
+          .optional()
+          .describe("'original' keeps the pinned dockerImage; 'latest' uses the newest Kaggle image (the default when nothing is sent)."),
         enableInternet: z.boolean().optional(),
         datasetDataSources: z.array(z.string()).optional().describe("'owner/dataset-slug' entries"),
         competitionDataSources: z.array(z.string()).optional().describe("Competition slugs"),

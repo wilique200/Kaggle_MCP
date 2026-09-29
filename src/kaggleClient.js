@@ -203,6 +203,8 @@ export class KaggleClient {
     kernelDataSources = [],
     modelDataSources = [],
     machineShape,
+    dockerImage,
+    dockerImagePinningType,
     categoryIds = [],
   }) {
     return this._request("/kernels/push", {
@@ -222,6 +224,8 @@ export class KaggleClient {
         kernelDataSources,
         modelDataSources,
         machineShape,
+        dockerImage,
+        dockerImagePinningType,
         categoryIds,
       },
     });
